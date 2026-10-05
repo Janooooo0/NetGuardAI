@@ -2,7 +2,7 @@
 
 Sistema inteligente para la detección de anomalías, análisis de degradación y predicción de riesgos en redes empresariales.
 
-> Proyecto del curso **Computación en Red III**, Escuela Profesional de Ingeniería de Sistemas, UCSM. Grupo N° [__], sección [__]. Versión 1.0.0.
+> Proyecto del curso **Computación en Red III**, Escuela Profesional de Ingeniería de Sistemas, UCSM, sección B. Versión 1.0.0.
 
 ## Descripción
 
