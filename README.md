@@ -78,7 +78,7 @@ psql -U postgres -c "CREATE DATABASE netguard OWNER netguard_user;"
 cp .env.example backend/.env      # Windows: copy .env.example backend\.env
 ```
 
-Edite `backend/.env` con sus valores. **No suba este archivo a GitHub.**
+Edite `backend/.env` con sus valores. 
 
 | Variable | Descripción | Ejemplo |
 |---|---|---|
