@@ -1,0 +1,620 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetGuard AI | Network Security</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            background: #0b1120;
+            color: #e2e8f0;
+        }
+
+        .sidebar {
+            width: 240px;
+            height: 100vh;
+            position: fixed;
+            background: #111827;
+            padding: 25px 18px;
+            border-right: 1px solid #263244;
+        }
+
+        .logo {
+            color: #38bdf8;
+            font-size: 23px;
+            font-weight: bold;
+            margin-bottom: 40px;
+        }
+
+        .logo span {
+            color: white;
+        }
+
+        .sidebar h4 {
+            color: #64748b;
+            font-size: 11px;
+            margin: 25px 10px 12px;
+            letter-spacing: 1px;
+        }
+
+        .sidebar a {
+            display: block;
+            color: #94a3b8;
+            text-decoration: none;
+            padding: 13px;
+            margin: 5px 0;
+            border-radius: 7px;
+        }
+
+        .sidebar a.active,
+        .sidebar a:hover {
+            background: #1e293b;
+            color: #38bdf8;
+        }
+
+        main {
+            margin-left: 240px;
+            padding: 30px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 26px;
+        }
+
+        header p {
+            color: #94a3b8;
+            margin-top: 8px;
+        }
+
+        .status {
+            background: #12352f;
+            color: #4ade80;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 13px;
+        }
+
+        .section-title {
+            margin: 30px 0 15px;
+            font-size: 18px;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 18px;
+        }
+
+        .card {
+            background: #151f30;
+            border: 1px solid #263244;
+            border-radius: 12px;
+            padding: 22px;
+        }
+
+        .card p {
+            color: #94a3b8;
+            font-size: 13px;
+        }
+
+        .card h2 {
+            font-size: 30px;
+            margin: 16px 0 10px;
+        }
+
+        .blue { color: #38bdf8; }
+        .green { color: #4ade80; }
+        .yellow { color: #facc15; }
+        .red { color: #f87171; }
+
+        .change {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .panel {
+            background: #151f30;
+            border: 1px solid #263244;
+            border-radius: 12px;
+            padding: 22px;
+            margin-bottom: 20px;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 22px;
+            gap: 10px;
+        }
+
+        .panel-header h3 {
+            font-size: 17px;
+        }
+
+        .panel-header span {
+            color: #94a3b8;
+            font-size: 12px;
+        }
+
+        .columns {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 20px;
+            margin-top: 25px;
+        }
+
+        .chart {
+            height: 190px;
+            display: flex;
+            align-items: end;
+            justify-content: space-around;
+            gap: 10px;
+            padding: 15px 5px 0;
+            border-bottom: 1px solid #334155;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 45px,
+                #263244 46px
+            );
+        }
+
+        .bar {
+            width: 8%;
+            min-width: 12px;
+            background: #0284c7;
+            border-radius: 5px 5px 0 0;
+        }
+
+        .chart-labels {
+            display: flex;
+            justify-content: space-around;
+            color: #64748b;
+            font-size: 11px;
+            margin-top: 10px;
+        }
+
+        .risk-box {
+            background: #2b2028;
+            border: 1px solid #713f46;
+            padding: 18px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+
+        .risk-box h4 {
+            color: #f87171;
+            margin-bottom: 10px;
+        }
+
+        .risk-box p {
+            color: #cbd5e1;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        .risk-score {
+            font-size: 35px;
+            color: #f87171;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th, td {
+            padding: 15px 12px;
+            text-align: left;
+            border-bottom: 1px solid #263244;
+        }
+
+        th {
+            color: #94a3b8;
+            font-weight: normal;
+        }
+
+        td {
+            color: #cbd5e1;
+        }
+
+        .badge {
+            padding: 5px 9px;
+            border-radius: 5px;
+            font-size: 11px;
+        }
+
+        .high {
+            background: #451f29;
+            color: #f87171;
+        }
+
+        .medium {
+            background: #453719;
+            color: #facc15;
+        }
+
+        .normal {
+            background: #12352f;
+            color: #4ade80;
+        }
+
+        .device {
+            color: #38bdf8;
+            font-weight: bold;
+        }
+
+        .button {
+            background: #0284c7;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 12px;
+        }
+
+        footer {
+            color: #64748b;
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+        }
+
+        @media (max-width: 1000px) {
+            .cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .columns {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 650px) {
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+            }
+
+            .sidebar h4 {
+                display: none;
+            }
+
+            .sidebar a {
+                display: inline-block;
+                padding: 8px;
+                font-size: 12px;
+            }
+
+            main {
+                margin-left: 0;
+                padding: 15px;
+            }
+
+            header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .cards {
+                grid-template-columns: 1fr;
+            }
+
+            .panel {
+                overflow-x: auto;
+            }
+
+            table {
+                min-width: 550px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <aside class="sidebar">
+        <div class="logo">NetGuard <span>AI</span></div>
+
+        <h4>PRINCIPAL</h4>
+        <a href="#dashboard" class="active">▦ Dashboard</a>
+        <a href="#dispositivos">▣ Dispositivos</a>
+        <a href="#anomalias">⌁ Anomalías</a>
+
+        <h4>ANÁLISIS INTELIGENTE</h4>
+        <a href="#degradacion">◷ Degradación</a>
+        <a href="#riesgos">⚠ Predicción de riesgos</a>
+
+        <h4>SISTEMA</h4>
+        <a href="#historial">▤ Historial de eventos</a>
+        <a href="#configuracion">⚙ Configuración</a>
+    </aside>
+
+    <main id="dashboard">
+
+        <header>
+            <div>
+                <h1>Dashboard de seguridad</h1>
+                <p>Monitoreo inteligente de la red empresarial</p>
+            </div>
+            <div class="status">● Sistema de demostración</div>
+        </header>
+
+        <h3 class="section-title">Resumen de la red</h3>
+
+        <section class="cards">
+            <div class="card">
+                <p>Dispositivos monitoreados</p>
+                <h2 class="blue">128</h2>
+                <span class="change">PCs, switches y routers</span>
+            </div>
+
+            <div class="card">
+                <p>Anomalías detectadas</p>
+                <h2 class="red">08</h2>
+                <span class="change">Eventos de ejemplo</span>
+            </div>
+
+            <div class="card">
+                <p>Dispositivos degradándose</p>
+                <h2 class="yellow">03</h2>
+                <span class="change">Requieren seguimiento</span>
+            </div>
+
+            <div class="card">
+                <p>Riesgos críticos</p>
+                <h2 class="red">02</h2>
+                <span class="change">Prioridad de revisión alta</span>
+            </div>
+        </section>
+
+        <section class="columns">
+
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Actividad de la red</h3>
+                    <span>Tráfico ilustrativo</span>
+                </div>
+
+                <div class="chart">
+                    <div class="bar" style="height:35%"></div>
+                    <div class="bar" style="height:48%"></div>
+                    <div class="bar" style="height:40%"></div>
+                    <div class="bar" style="height:65%"></div>
+                    <div class="bar" style="height:55%"></div>
+                    <div class="bar" style="height:80%"></div>
+                    <div class="bar" style="height:58%"></div>
+                    <div class="bar" style="height:95%; background:#ef4444"></div>
+                    <div class="bar" style="height:68%"></div>
+                    <div class="bar" style="height:50%"></div>
+                </div>
+
+                <div class="chart-labels">
+                    <span>08:00</span>
+                    <span>10:00</span>
+                    <span>12:00</span>
+                    <span>14:00</span>
+                    <span>16:00</span>
+                </div>
+            </div>
+
+            <div class="panel" id="riesgos">
+                <div class="panel-header">
+                    <h3>Índice de riesgo</h3>
+                    <span>Ejemplo</span>
+                </div>
+
+                <div class="risk-score">72/100</div>
+                <p style="color:#f87171; margin-bottom:15px;">
+                    ● Nivel de riesgo elevado
+                </p>
+
+                <div style="height:8px;background:#334155;border-radius:5px;">
+                    <div style="width:72%;height:8px;background:#ef4444;border-radius:5px;"></div>
+                </div>
+
+                <p style="color:#94a3b8;font-size:12px;margin-top:15px;line-height:1.6;">
+                    Valor ilustrativo basado en eventos simulados.
+                    Debe calcularse con datos reales y reglas de riesgo.
+                </p>
+            </div>
+
+        </section>
+
+        <section class="panel" id="anomalias">
+            <div class="panel-header">
+                <h3>Alertas recientes</h3>
+                <span>Últimos eventos de ejemplo</span>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Dispositivo</th>
+                        <th>Evento</th>
+                        <th>IP</th>
+                        <th>Riesgo</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    <tr>
+                        <td class="device">PC-A</td>
+                        <td>Aumento inusual de tráfico</td>
+                        <td>192.168.1.15</td>
+                        <td><span class="badge high">Alto</span></td>
+                        <td>Sin revisar</td>
+                    </tr>
+
+                    <tr>
+                        <td class="device">SW-01</td>
+                        <td>Incremento de errores</td>
+                        <td>192.168.1.2</td>
+                        <td><span class="badge medium">Medio</span></td>
+                        <td>En análisis</td>
+                    </tr>
+
+                    <tr>
+                        <td class="device">SERVER-01</td>
+                        <td>Latencia elevada</td>
+                        <td>192.168.1.10</td>
+                        <td><span class="badge medium">Medio</span></td>
+                        <td>En análisis</td>
+                    </tr>
+
+                    <tr>
+                        <td class="device">PC-B</td>
+                        <td>Comportamiento normal</td>
+                        <td>192.168.1.16</td>
+                        <td><span class="badge normal">Bajo</span></td>
+                        <td>Normal</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="columns">
+
+            <div class="panel" id="dispositivos">
+                <div class="panel-header">
+                    <h3>Estado de dispositivos</h3>
+                    <span>Inventario de ejemplo</span>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Dispositivo</th>
+                            <th>Tipo</th>
+                            <th>Disponibilidad</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        <tr>
+                            <td>PC-A</td>
+                            <td>Computadora</td>
+                            <td><span class="badge normal">Activo</span></td>
+                        </tr>
+
+                        <tr>
+                            <td>SW-01</td>
+                            <td>Switch</td>
+                            <td><span class="badge medium">Degradación</span></td>
+                        </tr>
+
+                        <tr>
+                            <td>RTR-01</td>
+                            <td>Router</td>
+                            <td><span class="badge normal">Activo</span></td>
+                        </tr>
+
+                        <tr>
+                            <td>SERVER-01</td>
+                            <td>Servidor</td>
+                            <td><span class="badge normal">Activo</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="panel" id="degradacion">
+                <div class="panel-header">
+                    <h3>Análisis de degradación</h3>
+                </div>
+
+                <div class="risk-box">
+                    <h4>⚠ SW-01</h4>
+                    <p>
+                        Indicadores de ejemplo: aumento de errores
+                        y posible degradación del rendimiento.
+                    </p>
+                    <p style="margin-top:10px;">
+                        <strong>Recomendación:</strong> revisar los
+                        puertos, contadores de errores y registros.
+                    </p>
+                </div>
+
+                <div class="risk-box">
+                    <h4>⚠ SERVER-01</h4>
+                    <p>
+                        Posible incremento de latencia respecto
+                        al comportamiento habitual.
+                    </p>
+                    <p style="margin-top:10px;">
+                        <strong>Recomendación:</strong> comparar
+                        métricas históricas de rendimiento.
+                    </p>
+                </div>
+            </div>
+
+        </section>
+
+        <section class="panel" id="historial">
+            <div class="panel-header">
+                <h3>Predicción de impacto</h3>
+                <span>Escenario ilustrativo</span>
+            </div>
+
+            <div class="risk-box">
+                <h4>Posible propagación de actividad anómala</h4>
+                <p>
+                    <strong>Origen:</strong> PC-A (192.168.1.15)
+                </p>
+                <p>
+                    <strong>Dispositivos por evaluar:</strong>
+                    SW-01, PC-B y SERVER-01.
+                </p>
+                <p>
+                    <strong>Acción sugerida:</strong>
+                    verificar las conexiones observadas, la topología
+                    de red y los registros antes de confirmar un impacto.
+                </p>
+            </div>
+        </section>
+
+        <section class="panel" id="configuracion">
+            <div class="panel-header">
+                <h3>Configuración del sistema</h3>
+            </div>
+
+            <p style="color:#94a3b8;line-height:1.8;">
+                Estado actual: interfaz de demostración.<br>
+                Fuente de datos: pendiente de conexión.<br>
+                Motor de inteligencia artificial: pendiente de integración.<br>
+                Base de datos: pendiente de integración.
+            </p>
+        </section>
+
+        <footer>
+            NetGuard AI © 2026 | Sistema de análisis de redes empresariales
+        </footer>
+
+    </main>
+
+</body>
+</html>
