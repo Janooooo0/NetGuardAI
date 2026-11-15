@@ -1,19 +1,37 @@
 import json
 import logging
+import os
 import random
+import socket
 import sqlite3
 import statistics
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Iterator
+from typing import Generator
 from urllib.parse import urlsplit
+
+if __package__:
+    from .snmp_collector import SnmpConfigurationError, collect_devices
+else:
+    from snmp_collector import SnmpConfigurationError, collect_devices
+
+try:
+    import psycopg2
+    from psycopg2.extras import DictCursor
+except ImportError:
+    psycopg2 = None
+    DictCursor = None
 
 
 DATABASE_PATH = Path(__file__).with_name("netguard.sqlite3")
-HOST = "127.0.0.1"
-PORT = 8000
+DATABASE_URL = os.environ.get("DATABASE_URL")
+HOST = os.environ.get("HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORT", "8000"))
+DATABASE_ERRORS = (sqlite3.Error,) + (
+    (psycopg2.Error,) if psycopg2 is not None else ()
+)
 
 DEVICES = [
     ("PC-A", "192.168.1.15", "Computadora"),
@@ -149,11 +167,61 @@ SEED_EVENTS = [
 ]
 
 
+class DatabaseConnection:
+    def __init__(
+        self,
+        connection: sqlite3.Connection | object,
+        *,
+        is_postgres: bool,
+    ) -> None:
+        self.connection = connection
+        self.is_postgres = is_postgres
+
+    def execute(self, query: str, parameters: tuple = ()):
+        if self.is_postgres:
+            cursor = self.connection.cursor(cursor_factory=DictCursor)
+            cursor.execute(query.replace("?", "%s"), parameters)
+            return cursor
+        return self.connection.execute(query, parameters)
+
+    def executemany(self, query: str, parameters):
+        if self.is_postgres:
+            cursor = self.connection.cursor(cursor_factory=DictCursor)
+            cursor.executemany(query.replace("?", "%s"), parameters)
+            return cursor
+        return self.connection.executemany(query, parameters)
+
+    def executescript(self, script: str) -> None:
+        self.connection.executescript(script)
+
+    def commit(self) -> None:
+        self.connection.commit()
+
+    def rollback(self) -> None:
+        self.connection.rollback()
+
+    def close(self) -> None:
+        self.connection.close()
+
+
 @contextmanager
-def database(path: Path = DATABASE_PATH) -> Iterator[sqlite3.Connection]:
-    connection = sqlite3.connect(path, timeout=5)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
+def database(path: Path | None = None) -> Generator[DatabaseConnection, None, None]:
+    use_postgres = path is None and bool(DATABASE_URL)
+    if use_postgres:
+        if psycopg2 is None:
+            raise RuntimeError(
+                "Se configuró DATABASE_URL, pero falta psycopg2. "
+                "Instala las dependencias con «.venv/bin/python -m pip install -r requirements.txt»."
+            )
+        raw_connection = psycopg2.connect(DATABASE_URL)
+        connection = DatabaseConnection(raw_connection, is_postgres=True)
+    else:
+        sqlite_path = path or DATABASE_PATH
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_connection = sqlite3.connect(sqlite_path, timeout=5)
+        raw_connection.row_factory = sqlite3.Row
+        raw_connection.execute("PRAGMA foreign_keys = ON")
+        connection = DatabaseConnection(raw_connection, is_postgres=False)
     try:
         yield connection
         connection.commit()
@@ -164,34 +232,51 @@ def database(path: Path = DATABASE_PATH) -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
-def timestamp(value: datetime | None = None) -> str:
+def timestamp(value: datetime | str | None = None) -> str:
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
     value = value or datetime.now(timezone.utc)
     return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace(
         "+00:00", "Z"
     )
 
 
-def initialize_database(path: Path = DATABASE_PATH) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def is_port_available(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+        return True
+
+
+def get_available_port(start_port: int = PORT, *, host: str = HOST, max_tries: int = 25) -> int:
+    for port in range(start_port, start_port + max_tries):
+        if is_port_available(host, port):
+            return port
+    raise OSError(f"No se encontró un puerto disponible desde {start_port}.")
+
+
+def initialize_database(path: Path | None = None) -> None:
     with database(path) as connection:
-        connection.executescript(
-            """
+        schema = """
             CREATE TABLE IF NOT EXISTS devices (
-                id INTEGER PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 ip TEXT NOT NULL UNIQUE,
                 type TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS topology (
-                source_id INTEGER NOT NULL REFERENCES devices(id),
-                target_id INTEGER NOT NULL REFERENCES devices(id),
+                source_id BIGINT NOT NULL REFERENCES devices(id),
+                target_id BIGINT NOT NULL REFERENCES devices(id),
                 PRIMARY KEY (source_id, target_id),
                 CHECK (source_id != target_id)
             );
             CREATE TABLE IF NOT EXISTS metrics (
-                id INTEGER PRIMARY KEY,
-                device_id INTEGER NOT NULL REFERENCES devices(id),
-                captured_at TEXT NOT NULL,
+                id BIGSERIAL PRIMARY KEY,
+                device_id BIGINT NOT NULL REFERENCES devices(id),
+                captured_at TIMESTAMPTZ NOT NULL,
                 latency_ms REAL NOT NULL,
                 packet_loss_pct REAL NOT NULL,
                 errors REAL NOT NULL,
@@ -202,9 +287,9 @@ def initialize_database(path: Path = DATABASE_PATH) -> None:
             CREATE INDEX IF NOT EXISTS metrics_device_time
                 ON metrics(device_id, captured_at);
             CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY,
-                device_id INTEGER NOT NULL REFERENCES devices(id),
-                captured_at TEXT NOT NULL,
+                id BIGSERIAL PRIMARY KEY,
+                device_id BIGINT NOT NULL REFERENCES devices(id),
+                captured_at TIMESTAMPTZ NOT NULL,
                 metric TEXT NOT NULL,
                 activity TEXT NOT NULL,
                 magnitude TEXT NOT NULL,
@@ -216,41 +301,71 @@ def initialize_database(path: Path = DATABASE_PATH) -> None:
             );
             CREATE INDEX IF NOT EXISTS events_time ON events(captured_at);
             CREATE TABLE IF NOT EXISTS predictions (
-                id INTEGER PRIMARY KEY,
-                event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-                device_id INTEGER NOT NULL REFERENCES devices(id),
+                id BIGSERIAL PRIMARY KEY,
+                event_id BIGINT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                device_id BIGINT NOT NULL REFERENCES devices(id),
                 hop_count INTEGER NOT NULL,
                 confidence REAL NOT NULL,
                 reason TEXT NOT NULL,
                 UNIQUE(event_id, device_id)
             );
-            """
-        )
-        device_count = connection.execute(
-            "SELECT COUNT(*) FROM devices"
-        ).fetchone()[0]
-        if device_count == 0:
-            seed_database(connection)
+            CREATE TABLE IF NOT EXISTS snmp_observations (
+                id BIGSERIAL PRIMARY KEY,
+                device_id BIGINT NOT NULL REFERENCES devices(id),
+                captured_at TIMESTAMPTZ NOT NULL,
+                uptime_ticks BIGINT NOT NULL,
+                interfaces_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS snmp_observations_device_time
+                ON snmp_observations(device_id, captured_at);
+        """
+        if connection.is_postgres:
+            for statement in schema.split(";"):
+                if statement.strip():
+                    connection.execute(statement)
+        else:
+            connection.executescript(schema.replace("BIGSERIAL", "INTEGER").replace("BIGINT", "INTEGER").replace("TIMESTAMPTZ", "TEXT"))
+        seed_database(connection)
 
 
-def seed_database(connection: sqlite3.Connection) -> None:
-    connection.executemany(
-        "INSERT INTO devices (name, ip, type) VALUES (?, ?, ?)", DEVICES
-    )
+def seed_database(connection: DatabaseConnection) -> None:
+    for name, ip, device_type in DEVICES:
+        existing_device = connection.execute(
+            "SELECT id FROM devices WHERE name = ?", (name,)
+        ).fetchone()
+        if existing_device is None:
+            connection.execute(
+                "INSERT INTO devices (name, ip, type) VALUES (?, ?, ?)",
+                (name, ip, device_type),
+            )
     device_ids = {
         row["name"]: row["id"]
         for row in connection.execute("SELECT id, name FROM devices")
     }
 
+    existing_topology = {
+        (row["source_id"], row["target_id"])
+        for row in connection.execute("SELECT source_id, target_id FROM topology")
+    }
+    missing_topology = [
+        (device_ids[left], device_ids[right])
+        for left, right in TOPOLOGY
+        if (device_ids[left], device_ids[right]) not in existing_topology
+    ]
     connection.executemany(
         "INSERT INTO topology (source_id, target_id) VALUES (?, ?)",
-        [(device_ids[left], device_ids[right]) for left, right in TOPOLOGY],
+        missing_topology,
     )
 
     now = datetime.now(timezone.utc)
     metric_rows = []
     for device_name, measurements in SEED_METRICS.items():
         device_id = device_ids[device_name]
+        has_metrics = connection.execute(
+            "SELECT 1 FROM metrics WHERE device_id = ? LIMIT 1", (device_id,)
+        ).fetchone()
+        if has_metrics:
+            continue
         for index, values in enumerate(measurements):
             measured_at = now - timedelta(minutes=(len(measurements) - index) * 30)
             metric_rows.append(
@@ -266,6 +381,11 @@ def seed_database(connection: sqlite3.Connection) -> None:
         metric_rows,
     )
 
+    event_count = connection.execute(
+        "SELECT COUNT(*) FROM events"
+    ).fetchone()[0]
+    if event_count:
+        return
     for event in SEED_EVENTS:
         event_id = insert_event(
             connection,
@@ -281,6 +401,123 @@ def seed_database(connection: sqlite3.Connection) -> None:
         create_predictions(connection, event_id, device_ids[event["device"]])
 
 
+def counter_delta(current: int | None, previous: int | None, modulus: int) -> int | None:
+    if current is None or previous is None:
+        return None
+    return (current - previous) % modulus
+
+
+def store_snmp_observations(
+    results: list[dict], path: Path | None = None
+) -> int:
+    initialize_database(path)
+    saved = 0
+    with database(path) as connection:
+        for result in results:
+            if "error" in result:
+                continue
+            device = connection.execute(
+                "SELECT id FROM devices WHERE ip = ?", (result["ip"],)
+            ).fetchone()
+            if device is None:
+                query = (
+                    "INSERT INTO devices (name, ip, type) VALUES (?, ?, ?) RETURNING id"
+                    if connection.is_postgres
+                    else "INSERT INTO devices (name, ip, type) VALUES (?, ?, ?)"
+                )
+                cursor = connection.execute(
+                    query, (result["name"], result["ip"], result["type"])
+                )
+                device_id = (
+                    cursor.fetchone()["id"]
+                    if connection.is_postgres
+                    else cursor.lastrowid
+                )
+            else:
+                device_id = device["id"]
+
+            previous = connection.execute(
+                """
+                SELECT captured_at, uptime_ticks, interfaces_json
+                FROM snmp_observations
+                WHERE device_id = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (device_id,),
+            ).fetchone()
+            captured_datetime = datetime.now(timezone.utc)
+            interfaces = [dict(interface) for interface in result["interfaces"]]
+            if previous:
+                previous_datetime = previous["captured_at"]
+                if isinstance(previous_datetime, str):
+                    previous_datetime = datetime.fromisoformat(
+                        previous_datetime.replace("Z", "+00:00")
+                    )
+                elapsed = (captured_datetime - previous_datetime).total_seconds()
+                rebooted = result["uptimeTicks"] < previous["uptime_ticks"]
+                old_interfaces = {
+                    interface["index"]: interface
+                    for interface in json.loads(previous["interfaces_json"])
+                }
+                for interface in interfaces:
+                    old = old_interfaces.get(interface["index"])
+                    if old is None or rebooted or elapsed <= 0:
+                        interface["trafficMbPerMinute"] = None
+                        interface["errorsSinceLast"] = None
+                        interface["discardsSinceLast"] = None
+                        continue
+                    byte_delta = counter_delta(
+                        interface["inOctets"], old["inOctets"], 2**64
+                    )
+                    outgoing_delta = counter_delta(
+                        interface["outOctets"], old["outOctets"], 2**64
+                    )
+                    error_deltas = [
+                        counter_delta(interface[key], old[key], 2**32)
+                        for key in ("inErrors", "outErrors")
+                    ]
+                    discard_deltas = [
+                        counter_delta(interface[key], old[key], 2**32)
+                        for key in ("inDiscards", "outDiscards")
+                    ]
+                    interface["trafficMbPerMinute"] = (
+                        round((byte_delta + outgoing_delta) * 60 / elapsed / 1_000_000, 2)
+                        if byte_delta is not None and outgoing_delta is not None
+                        else None
+                    )
+                    interface["errorsSinceLast"] = (
+                        sum(error_deltas)
+                        if all(value is not None for value in error_deltas)
+                        else None
+                    )
+                    interface["discardsSinceLast"] = (
+                        sum(discard_deltas)
+                        if all(value is not None for value in discard_deltas)
+                        else None
+                    )
+            else:
+                for interface in interfaces:
+                    interface["trafficMbPerMinute"] = None
+                    interface["errorsSinceLast"] = None
+                    interface["discardsSinceLast"] = None
+
+            connection.execute(
+                """
+                INSERT INTO snmp_observations (
+                    device_id, captured_at, uptime_ticks, interfaces_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    device_id,
+                    timestamp(captured_datetime),
+                    result["uptimeTicks"],
+                    json.dumps(interfaces, ensure_ascii=False),
+                ),
+            )
+            saved += 1
+    return saved
+
+
 def risk_level(score: int) -> str:
     if score >= 75:
         return "Alto"
@@ -294,7 +531,7 @@ def risk_css_class(level: str) -> str:
 
 
 def insert_event(
-    connection: sqlite3.Connection,
+    connection: DatabaseConnection,
     *,
     device_id: int,
     captured_at: str,
@@ -305,30 +542,32 @@ def insert_event(
     risk_score: int,
     recommendation: str,
 ) -> int:
-    cursor = connection.execute(
-        """
+    query = """
         INSERT INTO events (
             device_id, captured_at, metric, activity, magnitude, confidence,
             risk_score, risk_level, recommendation
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            device_id,
-            captured_at,
-            metric,
-            activity,
-            magnitude,
-            confidence,
-            risk_score,
-            risk_level(risk_score),
-            recommendation,
-        ),
+    """
+    parameters = (
+        device_id,
+        captured_at,
+        metric,
+        activity,
+        magnitude,
+        confidence,
+        risk_score,
+        risk_level(risk_score),
+        recommendation,
     )
+    if connection.is_postgres:
+        cursor = connection.execute(f"{query.rstrip()} RETURNING id", parameters)
+        return cursor.fetchone()["id"]
+    cursor = connection.execute(query, parameters)
     return cursor.lastrowid
 
 
 def create_predictions(
-    connection: sqlite3.Connection, event_id: int, origin_id: int
+    connection: DatabaseConnection, event_id: int, origin_id: int
 ) -> None:
     neighbors: dict[int, set[int]] = {}
     for edge in connection.execute("SELECT source_id, target_id FROM topology"):
@@ -401,7 +640,7 @@ def degradation_for_device(
     return changes
 
 
-def build_dashboard(path: Path = DATABASE_PATH) -> dict:
+def build_dashboard(path: Path | None = None) -> dict:
     initialize_database(path)
     now = datetime.now(timezone.utc)
     since = timestamp(now - timedelta(hours=24))
@@ -466,7 +705,7 @@ def build_dashboard(path: Path = DATABASE_PATH) -> dict:
                 "id": event["id"],
                 "device": event["device"],
                 "ip": event["ip"],
-                "capturedAt": event["captured_at"],
+                "capturedAt": timestamp(event["captured_at"]),
                 "metric": event["metric"],
                 "activity": event["activity"],
                 "magnitude": event["magnitude"],
@@ -540,7 +779,7 @@ def build_dashboard(path: Path = DATABASE_PATH) -> dict:
                     capture_time = samples[-1]["captured_at"]
                     traffic.append(
                         {
-                            "label": capture_time[11:16],
+                            "label": timestamp(capture_time)[11:16],
                             "value": round(
                                 statistics.fmean(
                                     sample["traffic_mb"] for sample in samples
@@ -550,9 +789,37 @@ def build_dashboard(path: Path = DATABASE_PATH) -> dict:
                         }
                     )
 
+        snmp_rows = connection.execute(
+            """
+            SELECT devices.name, devices.ip, devices.type,
+                       observations.captured_at, observations.uptime_ticks,
+                       observations.interfaces_json
+            FROM snmp_observations AS observations
+            JOIN devices ON devices.id = observations.device_id
+            JOIN (
+                    SELECT device_id, MAX(id) AS latest_id
+                    FROM snmp_observations
+                    GROUP BY device_id
+            ) AS latest ON latest.latest_id = observations.id
+            ORDER BY devices.name
+            """
+        ).fetchall()
+        snmp_devices = [
+            {
+                    "name": row["name"],
+                    "ip": row["ip"],
+                    "type": row["type"],
+                    "capturedAt": timestamp(row["captured_at"]),
+                    "uptimeSeconds": row["uptime_ticks"] // 100,
+                    "interfaces": json.loads(row["interfaces_json"]),
+            }
+            for row in snmp_rows
+        ]
+
         return {
             "generatedAt": timestamp(now),
             "mode": "simulado",
+            "database": "PostgreSQL" if connection.is_postgres else "SQLite",
             "riskIndex": risk_index,
             "riskLevel": risk_name,
             "riskExplanation": (
@@ -571,10 +838,11 @@ def build_dashboard(path: Path = DATABASE_PATH) -> dict:
             "degradations": degradations,
             "alerts": alerts,
             "traffic": traffic,
+            "snmpDevices": snmp_devices,
         }
 
 
-def simulate_observation(path: Path = DATABASE_PATH) -> dict:
+def simulate_observation(path: Path | None = None) -> dict:
     initialize_database(path)
     with database(path) as connection:
         device = random.choice(
@@ -681,7 +949,7 @@ class NetGuardHandler(BaseHTTPRequestHandler):
         if route == "/api/dashboard":
             try:
                 self.send_json(200, build_dashboard())
-            except (OSError, sqlite3.Error):
+            except (OSError, *DATABASE_ERRORS):
                 logging.exception("No se pudo leer el dashboard de NetGuard AI")
                 self.send_json(
                     500, {"error": "No fue posible leer los datos del dashboard."}
@@ -691,13 +959,57 @@ class NetGuardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         route = urlsplit(self.path).path
+        if route == "/api/snmp/poll":
+            try:
+                results = collect_devices()
+                saved = store_snmp_observations(results)
+                for result in results:
+                    if "error" in result:
+                        logging.warning(
+                            "No se pudo consultar SNMPv3 en %s (%s): %s",
+                            result["name"],
+                            result["ip"],
+                            result["error"],
+                        )
+                if saved == 0:
+                    details = "; ".join(
+                        f'{result["name"]}: {result["error"]}'
+                        for result in results
+                        if "error" in result
+                    )
+                    self.send_json(
+                        502,
+                        {
+                            "error": (
+                                "No se pudo consultar ninguno de los equipos SNMPv3. "
+                                f"{details}"
+                            ),
+                            "results": results,
+                        },
+                    )
+                else:
+                    self.send_json(
+                        200,
+                        {
+                            "saved": saved,
+                            "results": results,
+                        },
+                    )
+            except SnmpConfigurationError as error:
+                self.send_json(400, {"error": str(error)})
+            except (OSError, *DATABASE_ERRORS):
+                logging.exception("No se pudieron guardar observaciones SNMPv3")
+                self.send_json(
+                    500, {"error": "No se pudieron guardar las observaciones SNMPv3."}
+                )
+            return
         if route != "/api/simulate":
             self.send_json(404, {"error": "Ruta no encontrada."})
             return
         try:
             result = simulate_observation()
             self.send_json(201, result)
-        except (OSError, sqlite3.Error):
+        except (OSError, *DATABASE_ERRORS):
             logging.exception("No se pudo guardar la observación simulada")
             self.send_json(
                 500, {"error": "No fue posible guardar la observación simulada."}
@@ -709,9 +1021,11 @@ class NetGuardHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     initialize_database()
+    resolved_port = get_available_port(PORT, host=HOST)
+    os.environ["PORT"] = str(resolved_port)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    server = ThreadingHTTPServer((HOST, PORT), NetGuardHandler)
-    logging.info("API de demostración disponible en http://%s:%s", HOST, PORT)
+    server = ThreadingHTTPServer((HOST, resolved_port), NetGuardHandler)
+    logging.info("API de demostración disponible en http://%s:%s", HOST, resolved_port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

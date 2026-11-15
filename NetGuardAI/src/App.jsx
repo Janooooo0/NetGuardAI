@@ -6,6 +6,7 @@ const navigation = [
     links: [
       { href: "#dashboard", icon: "▦", label: "Dashboard" },
       { href: "#dispositivos", icon: "▣", label: "Dispositivos" },
+      { href: "#snmp", icon: "⌘", label: "Lecturas SNMPv3" },
       { href: "#anomalias", icon: "⌁", label: "Anomalías" },
     ],
   },
@@ -98,6 +99,55 @@ function formatTime(value) {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatUptime(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${days} d ${hours} h ${minutes} min`;
+}
+
+function InterfaceTable({ interfaces }) {
+  const statuses = {
+    1: "Activa",
+    2: "Inactiva",
+    3: "Prueba",
+    4: "Desconocida",
+    5: "Dormida",
+    6: "No disponible",
+    7: "Enlace inferior caído",
+  };
+  return (
+    <div className="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Interfaz</th>
+            <th>Estado</th>
+            <th>Tráfico</th>
+            <th>Errores desde lectura anterior</th>
+            <th>Descartes desde lectura anterior</th>
+          </tr>
+        </thead>
+        <tbody>
+          {interfaces.map((item) => (
+            <tr key={item.index}>
+              <td>{item.name}</td>
+              <td>{statuses[item.status] || "Sin dato"}</td>
+              <td>
+                {item.trafficMbPerMinute == null
+                  ? "Esperando otra lectura"
+                  : `${item.trafficMbPerMinute} MB/min`}
+              </td>
+              <td>{item.errorsSinceLast ?? "—"}</td>
+              <td>{item.discardsSinceLast ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function ActivityChart({ traffic }) {
@@ -279,6 +329,31 @@ function App() {
     }
   }
 
+  async function handleSnmpPoll() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await requestJson("/api/snmp/poll", { method: "POST" });
+      await loadDashboard();
+      const failures = result.results.filter((item) => item.error);
+      if (failures.length > 0) {
+        setError(
+          `Lecturas guardadas: ${result.saved}. Fallaron: ${failures
+            .map((item) => `${item.name} (${item.error})`)
+            .join("; ")}`,
+        );
+      } else {
+        setNotice(`Lectura SNMPv3 completada en ${result.saved} equipos.`);
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+      setLoading(false);
+    }
+  }
+
   if (loading && !dashboard) {
     return (
       <main className="standalone-message" aria-live="polite">
@@ -316,7 +391,7 @@ function App() {
           </div>
           <div className="header-actions">
             <div className="system-status">
-              <span aria-hidden="true">●</span> API activa · datos sintéticos
+              <span aria-hidden="true">●</span> API activa · demo y SNMPv3
             </div>
             <button
               className="button button-secondary"
@@ -331,6 +406,13 @@ function App() {
               disabled={busy}
             >
               {busy ? "Procesando…" : "Simular observación"}
+            </button>
+            <button
+              className="button button-secondary"
+              onClick={handleSnmpPoll}
+              disabled={busy}
+            >
+              {busy ? "Procesando…" : "Consultar SNMPv3"}
             </button>
           </div>
         </header>
@@ -455,6 +537,31 @@ function App() {
           </article>
         </section>
 
+        <section className="panel" id="snmp">
+          <PanelHeader
+            title="Lecturas SNMPv3 del laboratorio"
+            note="Consultas manuales · authPriv · solo lectura"
+          />
+          {dashboard.snmpDevices.length === 0 ? (
+            <p className="empty-state">
+              Aún no hay lecturas. Configura los dos equipos y pulsa “Consultar
+              SNMPv3”. El tráfico por minuto aparecerá después de una segunda
+              lectura.
+            </p>
+          ) : (
+            dashboard.snmpDevices.map((device) => (
+              <article className="risk-box" key={device.ip}>
+                <h3>{device.name}</h3>
+                <p className="configuration-copy">
+                  {device.ip} · Uptime: {formatUptime(device.uptimeSeconds)} ·
+                  Última lectura: {formatTime(device.capturedAt)}
+                </p>
+                <InterfaceTable interfaces={device.interfaces} />
+              </article>
+            ))
+          )}
+        </section>
+
         <section className="panel" id="historial">
           <PanelHeader title="Historial de eventos" note="Eventos registrados en SQLite" />
           {dashboard.alerts.length === 0 ? (
@@ -514,14 +621,15 @@ function App() {
         <section className="panel" id="configuracion">
           <PanelHeader title="Configuración del sistema" />
           <p className="configuration-copy">
-            Estado: prototipo local con observaciones sintéticas.
+            Estado: observaciones sintéticas y consultas SNMPv3 manuales.
             <br />
             Detección: línea base y reglas estadísticas demostrativas (no es un
             modelo de aprendizaje automático entrenado).
             <br />
-            Persistencia: SQLite local.
+            Persistencia: {dashboard.database}.
             <br />
-            Recolección de equipos reales: pendiente de integración y autorización.
+            SNMPv3: consulta solo equipos privados definidos en la configuración;
+            requiere instalar y restringir agentes de solo lectura.
           </p>
         </section>
 

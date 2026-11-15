@@ -3,3 +3,5 @@ dist/
 __pycache__/
 *.py[cod]
 backend/*.sqlite3
+.venv/
+.env
