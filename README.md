@@ -86,7 +86,7 @@ Edite `backend/.env` con sus valores.
 | `DB_PORT` | Puerto de BD | `5432` |
 | `DB_NAME` | Nombre de la BD | `netguard` |
 | `DB_USER` | Usuario de BD | `netguard_user` |
-| `DB_PASSWORD` | Clave del usuario | `cambiar_esto` |
+| `DB_PASSWORD` | Clave del usuario | `clave` |
 | `ANOMALY_CONTAMINATION` | Proporción esperada de anomalías | `0.05` |
 | `COLLECTOR_MODE` | `simulator` o `snmp` | `simulator` |
 
