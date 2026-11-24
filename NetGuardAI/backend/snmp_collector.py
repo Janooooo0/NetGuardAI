@@ -40,9 +40,9 @@ def load_devices(value: str | None = None) -> list[SnmpDevice]:
         parsed = json.loads(raw_devices)
     except json.JSONDecodeError as error:
         raise SnmpConfigurationError("SNMP_DEVICES debe ser una lista JSON válida.") from error
-    if not isinstance(parsed, list) or len(parsed) != 2:
+    if not isinstance(parsed, list) or not parsed:
         raise SnmpConfigurationError(
-            "SNMP_DEVICES debe contener exactamente los dos equipos del laboratorio."
+            "SNMP_DEVICES debe contener al menos un equipo autorizado."
         )
 
     devices = []

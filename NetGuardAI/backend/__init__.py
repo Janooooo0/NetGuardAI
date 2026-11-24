@@ -1,1 +1,1 @@
-"""Backend local de demostración para NetGuard AI."""
+"""Backend local de NetGuard AI."""

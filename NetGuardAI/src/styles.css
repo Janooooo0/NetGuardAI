@@ -166,6 +166,101 @@ main {
   background: #334155;
 }
 
+.inventory-import {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.inventory-import label {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.inventory-import input {
+  max-width: 100%;
+  color: var(--text);
+  font: inherit;
+}
+
+.security-scan-form {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.security-scan-form > label:first-child {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.scan-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.scan-input-row input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #111827;
+  color: #e2e8f0;
+  font: inherit;
+}
+
+.authorization-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.authorization-check input {
+  margin-top: 3px;
+}
+
+.scan-results {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.availability-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.snmp-security-check {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #111827;
+}
+
+.snmp-security-check .muted-copy {
+  margin: 0;
+}
+
+.scan-results h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
 .notice {
   display: flex;
   align-items: center;
@@ -357,6 +452,11 @@ main {
   color: var(--green);
 }
 
+.risk-no-data .risk-score,
+.risk-no-data .risk-level {
+  color: var(--muted);
+}
+
 .risk-progress {
   height: 8px;
   overflow: hidden;
@@ -385,6 +485,23 @@ main {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.risk-findings {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ollama-analysis {
+  margin: 15px 0 0;
+  color: var(--text);
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .table-scroll {

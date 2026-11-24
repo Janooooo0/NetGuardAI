@@ -1,0 +1,119 @@
+RESUMEN PARA EXPONER NETGUARD AI
+
+1. DESCRIPCION DEL PROYECTO
+
+NetGuard AI es un prototipo de monitoreo y analisis de seguridad para redes
+locales. Permite visualizar el estado de los equipos registrados, recolectar
+metricas mediante ICMP y SNMPv3, detectar anomalias de trafico y recibir
+analisis preliminares generados con inteligencia artificial local.
+
+
+2. PROBLEMA QUE RESUELVE
+
+El proyecto ayuda a centralizar informacion sobre el estado de una red y
+facilita identificar:
+
+- Equipos sin respuesta.
+- Perdida de paquetes y latencia.
+- Incrementos anormales de trafico.
+- Dispositivos potencialmente degradados.
+- Servicios accesibles desde la red.
+- Tendencias que podrian representar riesgos.
+
+
+3. OBJETIVO
+
+Ofrecer un dashboard local que reuna la telemetria disponible y apoye al
+administrador en la toma de decisiones. No reemplaza una solucion profesional
+de monitoreo ni confirma vulnerabilidades.
+
+
+4. FUNCIONALIDADES PRINCIPALES
+
+4.1 Dashboard de seguridad
+
+- Muestra los dispositivos monitoreados.
+- Presenta alertas, anomalias y riesgos.
+- Permite revisar el estado y las metricas recientes.
+
+4.2 Monitoreo ICMP
+
+- Desde el servidor se realizan pruebas ping a destinos autorizados.
+- Calcula latencia, disponibilidad y perdida de paquetes.
+- Puede ejecutarse periodicamente sin intervencion del usuario.
+
+4.3 Recoleccion SNMPv3
+
+- Consulta interfaces, estado, trafico, errores y descartes.
+- Utiliza autenticacion y privacidad mediante SNMPv3.
+- Guarda las lecturas en una base de datos local.
+
+4.4 Indice de riesgo de red
+
+- Calcula un puntaje entre 0 y 100.
+- Compara el trafico de las interfaces entre varias lecturas SNMP recientes.
+- Considera una anomalía sostenida como posible riesgo.
+
+4.5 Comprobacion de exposicion
+
+- Permite verificar puertos conocidos de una direccion privada.
+- Requiere confirmacion previa de autorizacion.
+- No explota servicios ni determina CVE o versiones.
+
+4.6 Analisis con IA
+
+- Puede utilizar Ollama y un modelo local.
+- Relaciona datos del inventario, metricas, SNMP y puertos accesibles.
+- Produce analisis preliminares sin enviar datos a servicios externos.
+
+
+5. ARQUITECTURA
+
+- React y Vite: interfaz grafica.
+- API Python: procesamiento, rutas HTTP y recoleccion de datos.
+- SQLite: almacenamiento predeterminado.
+- PostgreSQL: opcion alternativa configurable.
+- PySNMP: consultas SNMPv3.
+- Ollama: analisis inteligente opcional.
+
+El flujo es:
+
+Navegador -> React/Vite -> API Python -> SQLite/SNMP/ICMP
+                                      |
+                                      -> Ollama (opcional)
+
+
+6. EJEMPLO DE DEMOSTRACION
+
+1. Mostrar el dashboard y explicar los dispositivos registrados en laptop.csv.
+2. Mostrar que los datos reales provienen de la base de datos y no son
+   ficticios.
+3. Ejecutar una consulta ICMP o mostrar su ultima medicion.
+4. Ejecutar la consulta SNMPv3 y mostrar las interfaces obtenidas.
+5. Explicar como se calcula el indice de riesgo con comparaciones recientes.
+6. Realizar una comprobacion autorizada de puertos.
+7. Solicitar el analisis con Ollama y explicar su alcance.
+
+
+7. EJECUCION DEL PROYECTO
+
+npm run dev
+
+El frontend normalmente se abre en:
+
+http://127.0.0.1:5173
+
+
+8. ASPECTO MAS IMPORTANTE PARA CONCLUIR
+
+NetGuard AI es una herramienta de apoyo para el monitoreo y el analisis
+preliminar. Sus resultados dependen de las mediciones disponibles y no deben
+interpretarse automaticamente como vulnerabilidades o compromisos confirmados.
+
+Una posible conclusion seria:
+
+"NetGuard AI integra distintas fuentes de informacion de red en una sola
+interfaz. Combina monitoreo ICMP, SNMPv3, persistencia local, deteccion de
+anomalia y analisis con IA para permitir una revision rapida del estado de la
+red, manteniendo explicitos los limites y el caracter preliminar de sus
+resultados."
