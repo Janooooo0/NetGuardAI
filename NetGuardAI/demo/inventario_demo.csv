@@ -1,0 +1,9 @@
+ip,name,type,uplink
+192.168.10.1,Router-Core,Router,
+192.168.10.2,Switch-Piso1,Switch,192.168.10.1
+192.168.10.3,Switch-Piso2,Switch,192.168.10.1
+192.168.10.20,Servidor-Web,Servidor,192.168.10.2
+192.168.10.21,PC-Contabilidad,Computadora,192.168.10.2
+192.168.10.22,PC-Ventas,Computadora,192.168.10.2
+192.168.10.30,PC-Gerencia,Computadora,192.168.10.3
+192.168.10.31,PC-Soporte,Computadora,192.168.10.3

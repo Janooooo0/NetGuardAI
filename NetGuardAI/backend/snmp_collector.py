@@ -4,6 +4,10 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any
+try:
+    from .crypto_vault import VaultError, reveal
+except ImportError:
+    from crypto_vault import VaultError, reveal
 
 
 class SnmpConfigurationError(ValueError):
@@ -83,8 +87,11 @@ def load_devices(value: str | None = None) -> list[SnmpDevice]:
 
 def load_credentials() -> SnmpCredentials:
     username = os.environ.get("SNMPV3_USERNAME", "")
-    auth_password = os.environ.get("SNMPV3_AUTH_PASSWORD", "")
-    privacy_password = os.environ.get("SNMPV3_PRIV_PASSWORD", "")
+    try:
+        auth_password = reveal(os.environ.get("SNMPV3_AUTH_PASSWORD", ""))
+        privacy_password = reveal(os.environ.get("SNMPV3_PRIV_PASSWORD", ""))
+    except VaultError as error:
+        raise SnmpConfigurationError(f"Credenciales SNMPv3 cifradas: {error}") from error
     auth_protocol = os.environ.get("SNMPV3_AUTH_PROTOCOL", "SHA").upper()
     privacy_protocol = os.environ.get("SNMPV3_PRIV_PROTOCOL", "AES-128").upper()
     if not username:

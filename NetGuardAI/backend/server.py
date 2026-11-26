@@ -37,6 +37,8 @@ if __package__:
         collect_devices,
         load_devices,
     )
+    from .risk_propagation import record_risk_event
+    from .crypto_vault import status as encryption_status
 else:
     from ping_collector import (
         PingConfigurationError,
@@ -53,6 +55,8 @@ else:
         collect_devices,
         load_devices,
     )
+    from risk_propagation import record_risk_event
+    from crypto_vault import status as encryption_status
 
 try:
     import psycopg2
@@ -62,7 +66,7 @@ except ImportError:
     DictCursor = None
 
 
-DATABASE_PATH = Path(__file__).with_name("netguard.sqlite3")
+DATABASE_PATH = Path(os.environ.get("NETGUARD_DB_PATH") or Path(__file__).with_name("netguard.sqlite3"))
 DATABASE_URL = os.environ.get("DATABASE_URL")
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8000"))
@@ -73,6 +77,7 @@ MAX_INVENTORY_CSV_BYTES = 1_048_576
 MAX_INVENTORY_ROWS = 1000
 MAX_SECURITY_SCAN_BODY_BYTES = 1024
 SNMP_RISK_FRESHNESS = timedelta(hours=24)
+PING_LOSS_EVENT_PCT = 50.0
 SNMP_TRAFFIC_BASELINE_POLLS = 1
 SNMP_TRAFFIC_CONFIRMATION_POLLS = 2
 SNMP_TRAFFIC_MIN_ABSOLUTE_INCREASE = 1.0
@@ -92,7 +97,10 @@ SECURITY_SCAN_PORTS = {
 }
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
-LAPTOP_CSV_PATH = Path(__file__).resolve().parent.parent / "laptop.csv"
+LAPTOP_CSV_PATH = Path(
+    os.environ.get("NETGUARD_INVENTORY")
+    or Path(__file__).resolve().parent.parent / "laptop.csv"
+)
 
 
 class InventoryImportError(ValueError):
@@ -322,6 +330,7 @@ def parse_network_inventory(csv_content: str) -> list[dict[str, str | None]]:
         "name": {"name", "hostname", "host name", "device", "device name", "nombre"},
         "mac": {"mac", "mac address", "mac_address", "direccion mac", "dirección mac"},
         "type": {"type", "device type", "tipo"},
+        "uplink": {"uplink", "conectado_a", "conectado a", "parent", "padre"},
     }
     columns: dict[str, int] = {}
     for index, header in enumerate(headers):
@@ -389,7 +398,13 @@ def parse_network_inventory(csv_content: str) -> list[dict[str, str | None]]:
             seen_ips.add(ip)
             seen_names.add(name)
             devices.append(
-                {"ip": ip, "name": name, "mac": mac, "type": device_type}
+                {
+                    "ip": ip,
+                    "name": name,
+                    "mac": mac,
+                    "type": device_type,
+                    "uplink": value_for("uplink") or None,
+                }
             )
     except csv.Error as error:
         raise InventoryImportError("El archivo no contiene un CSV válido.") from error
@@ -581,6 +596,30 @@ def synchronize_devices(connection: DatabaseConnection) -> None:
                 "UPDATE devices SET name = ?, type = ? WHERE id = ?",
                 (device["name"], device["type"], existing_ip["id"]),
             )
+    synchronize_topology(connection, inventory)
+
+
+def synchronize_topology(
+    connection: DatabaseConnection, inventory: list[dict[str, str | None]]
+) -> None:
+    """Reconstruye la tabla topology a partir de la columna uplink del CSV."""
+    ids = {
+        key: row["id"]
+        for row in connection.execute("SELECT id, ip, name FROM devices").fetchall()
+        for key in (row["ip"], row["name"])
+    }
+    for device in inventory:
+        uplink = device.get("uplink")
+        source_id, target_id = ids.get(device["ip"]), ids.get(uplink or "")
+        if source_id is not None:
+            connection.execute("DELETE FROM topology WHERE source_id = ?", (source_id,))
+        if source_id is None or target_id is None or source_id == target_id:
+            continue
+        connection.execute(
+            "INSERT INTO topology (source_id, target_id) VALUES (?, ?) "
+            "ON CONFLICT DO NOTHING",
+            (source_id, target_id),
+        )
 
 
 def counter_delta(current: int | None, previous: int | None, modulus: int) -> int | None:
@@ -786,7 +825,57 @@ def store_snmp_observations(
                 ),
             )
             saved += 1
+            evaluate_snmp_anomaly(connection, device_id, captured_datetime)
     return saved
+
+
+def evaluate_snmp_anomaly(
+    connection: DatabaseConnection, device_id: int, now: datetime
+) -> None:
+    since = timestamp(now - SNMP_RISK_FRESHNESS)
+    rows = connection.execute(
+        """
+        SELECT captured_at, interfaces_json FROM snmp_observations
+        WHERE device_id = ? AND captured_at >= ? ORDER BY id
+        """,
+        (device_id, since),
+    ).fetchall()
+    series: dict[str, list[tuple[datetime, float | None]]] = {}
+    names: dict[str, str] = {}
+    for row in rows:
+        captured = parse_timestamp(timestamp(row["captured_at"]))
+        for interface in json.loads(row["interfaces_json"]):
+            index = str(interface.get("index", interface.get("name", "")))
+            names[index] = interface.get("name", index)
+            rate = interface.get("trafficMbPerMinute")
+            if not isinstance(rate, (int, float)) or isinstance(rate, bool):
+                rate = None
+            series.setdefault(index, []).append((captured, rate))
+    best = None
+    for index, rates in series.items():
+        score, _, finding = traffic_risk_for_interface(rates, now=now)
+        if finding and (best is None or score > best[0]):
+            best = (score, names[index], finding)
+    if best is None:
+        return
+    score, interface_name, finding = best
+    record_risk_event(
+        connection,
+        device_id=device_id,
+        captured_at=timestamp(now),
+        metric="Tráfico SNMP",
+        activity="Tráfico anómalo sostenido",
+        magnitude=(
+            f"{interface_name}: {finding['currentTrafficMbPerMinute']} MB/min "
+            f"(+{finding['increasePct']}% sobre la línea base)"
+        ),
+        confidence=round(min(0.95, 0.5 + score / 250), 2),
+        risk_score=score,
+        recommendation=(
+            "Identificar el origen del tráfico en la interfaz, descartar "
+            "descargas masivas, malware o bucles; vigilar dispositivos vecinos."
+        ),
+    )
 
 
 def store_ping_observation(
@@ -821,6 +910,22 @@ def store_ping_observation(
                 100 - measurement.packet_loss_pct,
             ),
         )
+        loss = measurement.packet_loss_pct
+        if loss >= PING_LOSS_EVENT_PCT:
+            record_risk_event(
+                connection,
+                device_id=device["id"],
+                captured_at=timestamp(),
+                metric="Pérdida de paquetes",
+                activity="Pérdida de conectividad" if loss >= 100 else "Pérdida de paquetes elevada",
+                magnitude=f"{loss:.0f}% de pérdida hacia {target.target_ip}",
+                confidence=round(min(0.95, 0.5 + loss / 200), 2),
+                risk_score=100 if loss >= 100 else 75 if loss >= 75 else 50,
+                recommendation=(
+                    "Verificar el enlace físico, el switch de acceso y el estado "
+                    "del equipo; revisar los dispositivos dependientes."
+                ),
+            )
 
 
 def run_ping_monitor(stop_event: threading.Event) -> None:
@@ -1479,6 +1584,9 @@ class NetGuardHandler(BaseHTTPRequestHandler):
         route = urlsplit(self.path).path
         if route == "/api/health":
             self.send_json(200, {"status": "ok", "mode": "inventario_csv"})
+            return
+        if route == "/api/security/encryption":
+            self.send_json(200, encryption_status())
             return
         if route == "/api/dashboard":
             try:

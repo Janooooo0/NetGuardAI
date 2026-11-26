@@ -112,7 +112,7 @@ def parse_ping_output(output: str) -> PingMeasurement:
         output,
     )
     if statistics_match is None:
-        raise PingProbeError("ping no devolvió estadísticas de paquetes.")
+        return parse_windows_ping_output(output)
 
     sent, received = map(int, statistics_match.groups())
     if sent <= 0 or received > sent:
@@ -128,14 +128,43 @@ def parse_ping_output(output: str) -> PingMeasurement:
     return PingMeasurement(sent, received, latency_ms, packet_loss_pct)
 
 
+def parse_windows_ping_output(output: str) -> PingMeasurement:
+    """Interpreta la salida de ping.exe de Windows (español o inglés).
+
+    Solo cuenta como respuesta las líneas con ``TTL=``: Windows informa
+    "Host de destino inaccesible" como paquete recibido aunque no lo sea.
+    """
+    sent_match = re.search(r"(?:enviados|Sent)\s*=\s*(\d+)", output, re.IGNORECASE)
+    if sent_match is None:
+        raise PingProbeError("ping no devolvió estadísticas de paquetes.")
+    sent = int(sent_match.group(1))
+    replies = re.findall(r"(?:tiempo|time)\s*[=<]\s*([0-9]+)\s*ms?\b.*TTL=", output, re.IGNORECASE)
+    received = len(replies)
+    if sent <= 0 or received > sent:
+        raise PingProbeError("ping devolvió contadores de paquetes inválidos.")
+    latency_ms = (
+        round(sum(float(value) for value in replies) / received, 2) if received else None
+    )
+    packet_loss_pct = round((sent - received) / sent * 100, 2)
+    return PingMeasurement(sent, received, latency_ms, packet_loss_pct)
+
+
 def probe_ping(target_ip: str) -> PingMeasurement:
     target_ip = _private_ipv4(target_ip, "target_ip")
     timeout = PING_COUNT * PING_TIMEOUT_SECONDS + 3
     environment = os.environ.copy()
     environment["LC_ALL"] = "C"
+    if os.name == "nt":
+        timeout = PING_COUNT * (PING_TIMEOUT_SECONDS + 1) + 5
+        command = [
+            "ping", "-n", str(PING_COUNT),
+            "-w", str(PING_TIMEOUT_SECONDS * 1000), target_ip,
+        ]
+    else:
+        command = None
     try:
         result = subprocess.run(
-            [
+            command or [
                 "ping",
                 "-n",
                 "-c",
@@ -149,6 +178,8 @@ def probe_ping(target_ip: str) -> PingMeasurement:
             check=False,
             capture_output=True,
             text=True,
+            encoding="cp850" if os.name == "nt" else None,
+            errors="replace",
             timeout=timeout,
             env=environment,
         )

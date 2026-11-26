@@ -6,6 +6,7 @@ import socket
 import tempfile
 import threading
 import unittest
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from http.server import HTTPServer
 from pathlib import Path
@@ -69,10 +70,19 @@ class NetGuardBackendTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    @contextmanager
+    def _sqlite_connection(self, path: Path | None = None):
+        connection = sqlite3.connect(path or self.database_path)
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
+
     def _insert_snmp_rate(
         self, ip: str, captured_at: datetime, rate: float
     ) -> None:
-        with sqlite3.connect(self.database_path) as connection:
+        with self._sqlite_connection() as connection:
             device = connection.execute(
                 "SELECT id FROM devices WHERE ip = ?", (ip,)
             ).fetchone()
@@ -279,7 +289,7 @@ class NetGuardBackendTests(unittest.TestCase):
         self.assertEqual(dashboard["traffic"], [])
 
     def test_dashboard_preserves_legacy_synthetic_rows_and_obsolete_devices(self) -> None:
-        with sqlite3.connect(self.database_path) as connection:
+        with self._sqlite_connection() as connection:
             obsolete = connection.execute(
                 "INSERT INTO devices (name, ip, type) VALUES (?, ?, ?)",
                 ("PC-A", "192.168.1.15", "Computadora"),
@@ -355,7 +365,7 @@ class NetGuardBackendTests(unittest.TestCase):
 
         self.assertEqual(dashboard["summary"]["monitoredDevices"], 2)
         self.assertEqual(dashboard["summary"]["anomalies"], 0)
-        with sqlite3.connect(self.database_path) as connection:
+        with self._sqlite_connection() as connection:
             self.assertEqual(
                 connection.execute("SELECT COUNT(*) FROM devices").fetchone()[0], 5
             )
@@ -552,7 +562,7 @@ class NetGuardBackendTests(unittest.TestCase):
 
     def test_initialization_preserves_legacy_devices_and_syncs_csv(self) -> None:
         partial_database = Path(self.temp_dir.name) / "partial.sqlite3"
-        with sqlite3.connect(partial_database) as connection:
+        with self._sqlite_connection(partial_database) as connection:
             connection.execute(
                 """
                 CREATE TABLE devices (
@@ -582,7 +592,7 @@ class NetGuardBackendTests(unittest.TestCase):
             {"192.168.1.48", "192.168.1.35"},
         )
         self.assertEqual(dashboard["alerts"], [])
-        with sqlite3.connect(partial_database) as connection:
+        with self._sqlite_connection(partial_database) as connection:
             migrated = connection.execute(
                 "SELECT name, ip FROM devices WHERE name = ?",
                 ("PC-A",),
